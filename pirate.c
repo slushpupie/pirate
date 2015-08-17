@@ -3,12 +3,12 @@
  * Copyright (C) 2010  Tetsuo Handa <penguin-kernel@I-love.SAKURA.ne.jp>
  * Copyright (C) 2010  Jay Kline <jkline@wareonearth.com>
  *
- * Parts of this code were originally apart of the AKARI project, 
+ * Parts of this code were originally apart of the AKARI project,
  * retrofited for the pirate project.  Specifically the method to load a LSM as
  * a LKM.
  *
  */
- 
+
 #include <linux/version.h>
 #include <linux/security.h>
 #include <linux/module.h>
@@ -20,19 +20,20 @@
 #include <linux/list.h>
 #include <linux/seq_file.h>
 #include <linux/proc_fs.h>
+#include <linux/sched.h>
 
 #include <asm/uaccess.h>
 
 /**
  * From include/linux/kernel.h
- * KERN_EMERG      "<0>"    system is unusable                   
- * KERN_ALERT      "<1>"    action must be taken immediately     
- * KERN_CRIT       "<2>"    critical conditions                  
- * KERN_ERR        "<3>"    error conditions                     
- * KERN_WARNING    "<4>"    warning conditions                   
- * KERN_NOTICE     "<5>"    normal but significant condition     
- * KERN_INFO       "<6>"    informational                        
- * KERN_DEBUG      "<7>"    debug-level messages                 
+ * KERN_EMERG      "<0>"    system is unusable
+ * KERN_ALERT      "<1>"    action must be taken immediately
+ * KERN_CRIT       "<2>"    critical conditions
+ * KERN_ERR        "<3>"    error conditions
+ * KERN_WARNING    "<4>"    warning conditions
+ * KERN_NOTICE     "<5>"    normal but significant condition
+ * KERN_INFO       "<6>"    informational
+ * KERN_DEBUG      "<7>"    debug-level messages
  */
 
 #define PIRATE_LOG KERN_WARNING
@@ -60,14 +61,14 @@ static int pirate_init_ignorelist(void)
 	ignorelist = kzalloc(sizeof(struct ignore_ll), GFP_KERNEL);
 	if(!ignorelist)
 		return -ENOMEM;
-		
+
 	INIT_LIST_HEAD( &(ignorelist->list) );
 
 	ignorelist->name = 0;
-	ignorelist->len = 0;	
-	
+	ignorelist->len = 0;
+
 	return 0;
-	
+
 }
 
 int file_is_whitelisted(char *filename) {
@@ -87,12 +88,12 @@ int read_line_from(char *buffer, int size, char **out_addr) {
 	char *out;
 	if (size < 1)
 		return -1;
-		
+
 	for(pos = 0; pos < size; ++pos) {
 		if(buffer[pos] == '\n' || buffer[pos] == 0) {
-			if(pos < 1) 
+			if(pos < 1)
 				return 0;
-				
+
 			out = kzalloc(sizeof(char) * (pos+1), GFP_KERNEL);
 			*out_addr = out;
 			if(!out)
@@ -103,19 +104,19 @@ int read_line_from(char *buffer, int size, char **out_addr) {
 			return pos;
 		}
 	}
-	
+
 	out = kzalloc(size+1, GFP_KERNEL);
 	*out_addr = out;
-	if(!out) 
+	if(!out)
 		return -ENOMEM;
 	if(copy_from_user(out,buffer,size) != 0)
 		return -EFAULT;
 	return size;
-	
+
 }
 
 
-int pirate_proc_write(struct file *file, const char __user *input, 
+int pirate_proc_write(struct file *file, const char __user *input,
 			size_t size, loff_t *loff)
 {
 	struct list_head *pos, *q;
@@ -127,16 +128,16 @@ int pirate_proc_write(struct file *file, const char __user *input,
 	size_t remaining = size;
 	if(size == 0)
 		return 0;
-	if (*loff != 0) 
+	if (*loff != 0)
 		return -ESPIPE;
-	
+
 	while (remaining > 0 && (len = read_line_from(buffer, remaining, &line)) != -1) {
-		if (len < 0) 
+		if (len < 0)
 			return len; /* error code */
 		if (len == 0)
 			continue; /* empty line */
-			
-		
+
+
 		remaining -= len+1; /* We skip the \n separator */
 		buffer = buffer+len+1;
 
@@ -148,9 +149,9 @@ int pirate_proc_write(struct file *file, const char __user *input,
 			remove = 0;
 			line++;
 		}
-		
+
 		if(line[0] != '/') {
-			printk(PIRATE_LOG "pirate: '%s' is not an absolute path\n");
+			printk(PIRATE_LOG "pirate: '%s' is not an absolute path\n", line);
 			continue;
 		}
 
@@ -180,11 +181,11 @@ int pirate_proc_write(struct file *file, const char __user *input,
 			list_add_tail(&(new->list), &ignorelist->list);
 		}
 	}
-	
+
 	return size;
 }
-	
-	
+
+
 static void *pirate_seq_start(struct seq_file *seq, loff_t *pos)
 	__acquires(pirate_lock)
 {
@@ -192,31 +193,31 @@ static void *pirate_seq_start(struct seq_file *seq, loff_t *pos)
 	struct ignore_ll *e;
 
 	spin_lock_bh(&pirate_lock);
-	
-	if (p == 0) 
+
+	if (p == 0)
 		return ignorelist;
-		
+
 	list_for_each_entry(e, &(ignorelist->list), list)
 		if(p-- == 0)
-			return e;	
-	
+			return e;
+
 	return NULL;
-	
+
 }
 
 static void *pirate_seq_next(struct seq_file *seq, void *v, loff_t *pos)
 {
 	struct ignore_ll *e = v;
 	struct list_head *next;
-	
-	if(v == NULL) 
+
+	if(v == NULL)
 		return NULL;
-	
+
 	next = e->list.next;
 	++(*pos);
 	if( e->list.next == &(ignorelist->list) )
 		return NULL;
-	
+
 
 	return list_entry(next, struct ignore_ll, list);
 }
@@ -230,17 +231,17 @@ static void pirate_seq_stop(struct seq_file *s, void *v)
 static int pirate_seq_show(struct seq_file *seq, void *v)
 {
 	struct ignore_ll *e = v;
-	
-	if(v == NULL) 
+
+	if(v == NULL)
 		return 0;
-	
+
 	if(seq == NULL)
 		return 0;
-		
-	if(e->len > 0)	
+
+	if(e->len > 0)
 		seq_printf(seq, "%s\n", e->name);
-		
-	
+
+
 	return 0;
 }
 
@@ -262,7 +263,7 @@ static int pirate_seq_open(struct inode *inode, struct file *file)
 
 static const struct file_operations pirate_proc_fops = {
 	.open		= pirate_seq_open,
-	.read		= seq_read, 
+	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release 	= seq_release_private,
 	.write		= pirate_proc_write,
@@ -273,17 +274,19 @@ static const struct file_operations pirate_proc_fops = {
 static int pirate_init_proc(void)
 {
 	ignorelist_proc_file = proc_create(procfs_name, 0600, NULL, &pirate_proc_fops);
-	
+
 	if (ignorelist_proc_file == NULL) {
 		remove_proc_entry(procfs_name, NULL);
 		printk(PIRATE_LOG "pirate: Could not initialize /proc/%s\n",
 			procfs_name);
 		return -ENOMEM;
 	}
-	
-	ignorelist_proc_file->uid = 0;
+
+	/*
+  ignorelist_proc_file->uid = 0;
 	ignorelist_proc_file->gid = 0;
-	
+  */
+
 	pirate_init_ignorelist();
 	return 0;
 }
@@ -292,19 +295,19 @@ static int pirate_cleanup_proc(void)
 {
 	struct list_head *pos,*q;
 	struct ignore_ll *cur;
-	
+
 	remove_proc_entry(procfs_name, NULL);
 	list_for_each_safe(pos, q, &(ignorelist->list)) {
 		cur = list_entry(pos, struct ignore_ll, list);
 		list_del(pos);
 		kfree(cur->name);
-		kfree(cur);	
+		kfree(cur);
 	}
-		
+
 	return 0;
-}	
-		
-	
+}
+
+
 #endif /* CONFIG_PROC_FS */
 
 
@@ -356,26 +359,26 @@ static int get_exe_from_task(struct task_struct *task, char __user *buffer, int 
 		up_read(&mm->mmap_sem);
 		return -1;
 	}
-	
+
 	get_file(exe_file);
 	exe_path = &exe_file->f_path;
 	path_get(&exe_file->f_path);
 	up_read(&mm->mmap_sem);
 
 	tmp = (char*)__get_free_page(GFP_TEMPORARY);
-	if(!tmp) 
+	if(!tmp)
 		return -ENOMEM;
-	
+
 	pathname = d_path(exe_path, tmp, PAGE_SIZE);
 	len = PTR_ERR(pathname);
 	if (IS_ERR(pathname))
 		goto out;
 	len = tmp + PAGE_SIZE - 1 - pathname;
-	
+
 	if (len > buflen)
 		len = buflen;
 	if (strncpy(buffer, pathname, len))
-		
+
 out:
 	free_page((unsigned long)tmp);
 	return len;
@@ -385,13 +388,13 @@ out:
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
 static int pirate_bprm_set_creds(struct linux_binprm *bprm) {
-	
+
 	int elevate = 0;
 	int report = 0;
 	char *file_path; /* file to be executed */
 	char *exe_path; /* file currently executing (may not be availible) */
 	int exe_path_len = 0;
-	
+
 	if(current->cred->euid != bprm->cred->euid ||
 	   current->cred->egid != bprm->cred->egid) {
 		elevate = 1;
@@ -407,7 +410,7 @@ static int pirate_bprm_set_creds(struct linux_binprm *bprm) {
 		if(IS_ERR(t_len))
 			return t_len;
 		free_page((unsigned long) t);
-			
+
 		exe_path = (char*) __get_free_page(GFP_TEMPORARY);
 		t_len = PAGE_SIZE;
 		exe_path_len = get_exe_from_task(current, exe_path, t_len);
@@ -417,7 +420,7 @@ static int pirate_bprm_set_creds(struct linux_binprm *bprm) {
 			exe_path[exe_path_len] = 0;
 		else
 			exe_path[PAGE_SIZE-1] = 0;
-			
+
 #ifdef CONFIG_PROC_FS
 		if(file_is_whitelisted(file_path)) {
 			report = 0;
@@ -427,9 +430,9 @@ static int pirate_bprm_set_creds(struct linux_binprm *bprm) {
 	}
 	if(report) {
 		if(exe_path_len < 1) {
-			/* No executable found. Out of memory? Some other problem? */	
+			/* No executable found. Out of memory? Some other problem? */
 			printk(PIRATE_LOG "pirate: bprm_set_creds(file=%s:uid=%d:euid=%d,suid=%d,fsuid=%d,gid=%d,egid=%d,sgid=%d,fsgid=%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d,exe=(null))\n",
-				file_path,			
+				file_path,
 				bprm->cred->uid,
 				bprm->cred->euid,
 				bprm->cred->suid,
@@ -445,7 +448,7 @@ static int pirate_bprm_set_creds(struct linux_binprm *bprm) {
 				current->pid);
 		} else {
 			printk(PIRATE_LOG "pirate: bprm_set_creds(file=%s:uid=%d:euid=%d,suid=%d,fsuid=%d,gid=%d,egid=%d,sgid=%d,fsgid=%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d,exe=%s)\n",
-				file_path,			
+				file_path,
 				bprm->cred->uid,
 				bprm->cred->euid,
 				bprm->cred->suid,
@@ -481,7 +484,7 @@ static int pirate_bprm_set_security(struct linux_binprm *bprm) {
 		elevate = 1;
 		report = 1;
 	}
-	
+
 	if(elevate) {
 		char *t = (char*) __get_free_page(GFP_TEMPORARY);
 		int t_len = PAGE_SIZE;
@@ -490,7 +493,7 @@ static int pirate_bprm_set_security(struct linux_binprm *bprm) {
 		if(IS_ERR(t_len))
 			return t_len;
 		free_page((unsigned long) t);
-		
+
 		exe_path = (char*) __get_free_page(GFP_TEMPORARY);
 		t_len = PAGE_SIZE;
 		exe_path_len = get_exe_from_task(current, exe_path, len);
@@ -500,7 +503,7 @@ static int pirate_bprm_set_security(struct linux_binprm *bprm) {
 			exe_path[exe_path_len] = 0;
 		else
 			exe_path[PAGE_SIZE-1] = 0;
-			
+
 #ifdef CONFIG_PROC_FS
 		if(file_is_whitelisted(file_path)) {
 			report = 0;
@@ -508,12 +511,12 @@ static int pirate_bprm_set_security(struct linux_binprm *bprm) {
 		}
 #endif
 	}
-	
+
 	if(report) {
 		if(exe_path_len < 1) {
 			/* No executable found. Out of memory? Some other problem? */
 			printk(PIRATE_LOG "pirate: bprm_set_security(file=%s:e_uid=%d:e_gid=%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d,exe=(null))\n",
-				file_path,			
+				file_path,
 				bprm->e_uid,
 				bprm->e_gid,
 				current->uid,
@@ -549,20 +552,21 @@ static int pirate_task_fix_setuid (struct cred *new, const struct cred *old, int
 	int report = 0;
 	char *exe_path; /* file currently executing (may not be availible) */
 	int exe_path_len = 0;
-	
-	
-	 
-	 if ((old->uid   != 0 && new->uid   == 0) ||
-	     (old->euid  != 0 && new->euid  == 0) ||
-	     (old->suid  != 0 && new->suid  == 0) ||
-	     (old->fsuid != 0 && new->fsuid == 0)) {
+
+  kuid_t u_root = 0;
+  kguid_t g_root = 0;
+
+	 if ((old->uid   != u_root && new->uid   == u_root) ||
+	     (old->euid  != u_root && new->euid  == u_root) ||
+	     (old->suid  != u_root && new->suid  == u_root) ||
+	     (old->fsuid != u_root && new->fsuid == u_root)) {
 	     	elevate = 1;
 		report = 1;
 	 }
-	 
+
 	if (elevate) {
 		int len = PAGE_SIZE;
-		exe_path = (char*) __get_free_page(GFP_TEMPORARY);	
+		exe_path = (char*) __get_free_page(GFP_TEMPORARY);
 		exe_path_len = get_exe_from_task(current, exe_path, len);
 		if(IS_ERR(exe_path_len))
 			return exe_path_len;
@@ -570,7 +574,7 @@ static int pirate_task_fix_setuid (struct cred *new, const struct cred *old, int
 			exe_path[exe_path_len] = 0;
 		else
 			exe_path[PAGE_SIZE-1] = 0;
-			
+
 #ifdef CONFIG_PROC_FS
 		if(file_is_whitelisted(exe_path)) {
 			report = 0;
@@ -578,12 +582,12 @@ static int pirate_task_fix_setuid (struct cred *new, const struct cred *old, int
 		}
 #endif
 	}
-		 
+
 	if (report) {
 
 		if(exe_path_len < 1) {
 			/* No executable found. Out of memory? Some other problem? */
-			printk(PIRATE_LOG "pirate: task_fix_setuid( (old(uid=%d:euid=%d,suid=%d,fsuid=%d), new(uid=%d:euid=%d,suid=%d,fsuid=%d), %d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=(null))\n", 
+			printk(PIRATE_LOG "pirate: task_fix_setuid( (old(uid=%d:euid=%d,suid=%d,fsuid=%d), new(uid=%d:euid=%d,suid=%d,fsuid=%d), %d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=(null))\n",
 					old->uid,
 					old->euid,
 					old->suid,
@@ -599,7 +603,7 @@ static int pirate_task_fix_setuid (struct cred *new, const struct cred *old, int
 					current->cred->fsuid,
 					current->pid);
 		} else {
-			printk(PIRATE_LOG "pirate: task_fix_setuid( (old(uid=%d:euid=%d,suid=%d,fsuid=%d), new(uid=%d:euid=%d,suid=%d,fsuid=%d), %d)  current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=%s)\n", 
+			printk(PIRATE_LOG "pirate: task_fix_setuid( (old(uid=%d:euid=%d,suid=%d,fsuid=%d), new(uid=%d:euid=%d,suid=%d,fsuid=%d), %d)  current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=%s)\n",
 					old->uid,
 					old->euid,
 					old->suid,
@@ -627,17 +631,20 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 	int report = 0;
 	char *exe_path; /* file currently executing (may not be availible) */
 	int exe_path_len = 0;
-	
+
+  kuid_t u_root = 0;
+  kguid_t g_root = 0;
+
 	if (flags == LSM_SETID_ID) {
-		/* sys_setuid called 
-		 * id0 = requested gid 
+		/* sys_setuid called
+		 * id0 = requested gid
 		 * id1 = -1
 		 * id2 = -1
-		 * 
+		 *
 		 * See kernel/sys.c:sys_setgid
-		 * 
+		 *
 		 */
-		 if( (current->cred->gid != 0 || current->cred->sgid != 0) && id0 == 0) {
+		 if( (current->cred->gid != g_root || current->cred->sgid != g_root) && id0 == g_root) {
 		 	elevate = 1;
 		 	report = 1;
 		 }
@@ -646,12 +653,12 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 		 * id0 = requested rgid
 		 * id1 = requested egid
 		 * id2 = -1
-		 * 
+		 *
 		 * See kernel/sys.c/sys_setregid
 		 *
 		 */
-		 if( (current->cred->gid != 0 || current->cred->egid != 0) &&
-		     (id0 == 0 || id1 == 0) ) {
+		 if( (current->cred->gid != g_root || current->cred->egid != g_root) &&
+		     (id0 == g_root || id1 == g_root) ) {
 		     	elevate = 1;
 		 	report = 1;
 		 }
@@ -665,15 +672,15 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 		 *
 		 *
 		 */
-		 if( (current->cred->gid != 0 || current->cred->egid != 0 || current->cred->sgid != 0) &&
-		     (id0 == 0 || id1 == 0 || id2 == 0) ) {
+		 if( (current->cred->gid != g_root || current->cred->egid != g_root || current->cred->sgid != g_root) &&
+		     (id0 == g_root || id1 == g_root || id2 == g_root) ) {
 		     	elevate = 1;
 		 	report = 1;
 		 }
 	} else {
 		printk(PIRATE_LOG "pirate: task_setgid called with unknown flags option\n");
 	}
-	
+
 	if (elevate) {
 		exe_path = (char*) __get_free_page(GFP_TEMPORARY);
 		int len = PAGE_SIZE;
@@ -684,7 +691,7 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 			exe_path[exe_path_len] = 0;
 		else
 			exe_path[PAGE_SIZE-1] = 0;
-			
+
 #ifdef CONFIG_PROC_FS
 		if(file_is_whitelisted(exe_path)) {
 			report = 0;
@@ -692,11 +699,11 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 		}
 #endif
 	}
-		 
+
 	if (report) {
 		if(exe_path_len < 1) {
 			/* No executable found. Out of memory? Some other problem? */
-			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=(null))\n", 
+			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=(null))\n",
 					id0,
 					id1,
 					id2,
@@ -707,7 +714,7 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 					current->cred->fsgid,
 					current->pid);
 		} else {
-			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=%s)\n", 
+			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=%s)\n",
 					id0,
 					id1,
 					id2,
@@ -731,17 +738,17 @@ static int pirate_task_setuid (uid_t id0, uid_t id1, uid_t id2, int flags)
 	int report = 0;
 	char *exe_path; /* file currently executing (may not be availible) */
 	int exe_path_len = 0;
-	
+
 	if (flags == LSM_SETID_ID) {
-		/* sys_setuid called 
-		 * id0 = requested uid 
+		/* sys_setuid called
+		 * id0 = requested uid
 		 * id1 = -1
 		 * id2 = -1
-		 * 
+		 *
 		 * See kernel/sys.c:sys_setuid
-		 * 
+		 *
 		 */
-		 
+
 		 if( (current->uid != 0 || current->euid != 0) && id0 == 0) {
 		 	/* Non root real user id requesting root */
 		 	elevate = 1;
@@ -752,7 +759,7 @@ static int pirate_task_setuid (uid_t id0, uid_t id1, uid_t id2, int flags)
 		 * id0 = requested ruid
 		 * id1 = requested euid
 		 * id2 = -1
-		 * 
+		 *
 		 * See kernel/sys.c/sys_setreuid
 		 *
 		 */
@@ -779,7 +786,7 @@ static int pirate_task_setuid (uid_t id0, uid_t id1, uid_t id2, int flags)
 	} else {
 		printk(PIRATE_LOG "pirate: task_setuid called with unknown flags option\n");
 	}
-	
+
 	if (elevate) {
 		exe_path = (char*) __get_free_page(GFP_TEMPORARY);
 		int len = PAGE_SIZE;
@@ -790,7 +797,7 @@ static int pirate_task_setuid (uid_t id0, uid_t id1, uid_t id2, int flags)
 			exe_path[exe_path_len] = 0;
 		else
 			exe_path[PAGE_SIZE-1] = 0;
-			
+
 #ifdef CONFIG_PROC_FS
 		if(file_is_whitelisted(file_path)) {
 			report = 0;
@@ -798,11 +805,11 @@ static int pirate_task_setuid (uid_t id0, uid_t id1, uid_t id2, int flags)
 		}
 #endif
 	}
-		 
+
 	if (report) {
 		if(exe_path_len < 1) {
 			/* No executable found. Out of memory? Some other problem? */
-			printk(PIRATE_LOG "pirate: task_setuid(%d,%d,%d,%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=(null))\n", 
+			printk(PIRATE_LOG "pirate: task_setuid(%d,%d,%d,%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=(null))\n",
 					id0,
 					id1,
 					id2,
@@ -813,7 +820,7 @@ static int pirate_task_setuid (uid_t id0, uid_t id1, uid_t id2, int flags)
 					current->fsuid,
 					current->pid);
 		} else {
-			printk(PIRATE_LOG "pirate: task_setuid(%d,%d,%d,%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=%s)\n", 
+			printk(PIRATE_LOG "pirate: task_setuid(%d,%d,%d,%d) current(uid=%d:euid=%d:suid=%d:fsuid=%d:pid=%d:exe=%s)\n",
 					id0,
 					id1,
 					id2,
@@ -836,15 +843,15 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 	int report = 0;
 	char *exe_path; /* file currently executing (may not be availible) */
 	int exe_path_len = 0;
-	
+
 	if (flags == LSM_SETID_ID) {
-		/* sys_setuid called 
-		 * id0 = requested gid 
+		/* sys_setuid called
+		 * id0 = requested gid
 		 * id1 = -1
 		 * id2 = -1
-		 * 
+		 *
 		 * See kernel/sys.c:sys_setgid
-		 * 
+		 *
 		 */
 		 if( (current->gid != 0 || current->sgid != 0) && id0 == 0) {
 		 	elevate = 1;
@@ -855,7 +862,7 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 		 * id0 = requested rgid
 		 * id1 = requested egid
 		 * id2 = -1
-		 * 
+		 *
 		 * See kernel/sys.c/sys_setregid
 		 *
 		 */
@@ -882,7 +889,7 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 	} else {
 		printk(PIRATE_LOG "pirate: task_setgid called with unknown flags option\n");
 	}
-	
+
 	if (elvate) {
 		exe_path = (char*) __get_free_page(GFP_TEMPORARY);
 		int len = PAGE_SIZE;
@@ -893,7 +900,7 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 			exe_path[exe_path_len] = 0;
 		else
 			exe_path[PAGE_SIZE-1] = 0;
-			
+
 #ifdef CONFIG_PROC_FS
 		if(file_is_whitelisted(file_path)) {
 			report = 0;
@@ -901,12 +908,12 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 		}
 #endif
 	}
-		 
-		 
+
+
 	if (report) {
 		if(exe_path_len < 1) {
 			/* No executable found. Out of memory? Some other problem? */
-			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=(null))\n", 
+			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=(null))\n",
 					id0,
 					id1,
 					id2,
@@ -917,7 +924,7 @@ static int pirate_task_setgid(gid_t id0, gid_t id1, gid_t id2, int flags)
 					current->fsgid,
 					current->pid);
 		} else {
-			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=%s)\n", 
+			printk(PIRATE_LOG "pirate: task_setgid(%d,%d,%d,%d) current(gid=%d:egid=%d:sgid=%d:fsgid=%d:pid=%d:exe=%s)\n",
 					id0,
 					id1,
 					id2,
@@ -1236,13 +1243,10 @@ static void __exit pirate_cleanup(void)
 #ifdef CONFIG_PROC_FS
 	pirate_cleanup_proc();
 #endif
-	 pirate_unupdate_security_ops(); 
+	 pirate_unupdate_security_ops();
 }
 */
 
 module_init(pirate_init);
 /* module_exit(pirate_cleanup); */
 MODULE_LICENSE("GPL");
-
-
-
